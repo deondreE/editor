@@ -1,0 +1,9 @@
+.build/
+.vs/
+*.rdi
+*.dll
+*.exe
+*.lib 
+*.exp
+*.pdb
+*.ini
