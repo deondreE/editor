@@ -18,6 +18,7 @@ Renderer :: struct {
 W32Handle :: struct {
 	hdc: HDC;
 	width: s32;
+	hwnd: HWND;
 	height: s32; 
 }
 

@@ -57,6 +57,8 @@ main :: ()
 
 	init_opengl(*r);
 
+	gl.glViewport(0, 0, xx r.window.width, xx r.window.height);
+	
 	init_render_batch(*r, *cur_batch);
 
 	shader_id := create_shader_program(*r, vertex_shader_source, fragment_shader_source);
@@ -69,6 +71,7 @@ main :: ()
 
 		// Typicall orthographic projection for the core text rendering.
 		projection := orthographic_projection_matrix(0, xx r.window.width, xx r.window.height, 0, -1, 1);
+		
 		proj_loc := gl.glGetUniformLocation(shader_id, "projection");
 		gl.glUniformMatrix4fv(proj_loc, 1, GL_TRUE, *projection._11);
 

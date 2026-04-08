@@ -7,17 +7,13 @@
 
 #program_export
 init_opengl :: (r: *Renderer) -> bool {
-    if !r.window.hwnd {
-        log_error("init_opengl: r.window.hwnd is null!");
-        return false;
-    }
+    WGL_CONTEXT_MAJOR_VERSION_ARB          :: 0x2091;
+    WGL_CONTEXT_MINOR_VERSION_ARB          :: 0x2092;
+    WGL_CONTEXT_PROFILE_MASK_ARB           :: 0x9126;
+    WGL_CONTEXT_CORE_PROFILE_BIT_ARB       :: 0x00000001;
 
     r.window.hdc = GetDC(r.window.hwnd);
-    if !r.window.hdc {
-        log_error("GetDC failed! Error: %", GetLastError());
-        return false;
-    }
-
+    
     pfd: PIXELFORMATDESCRIPTOR;
     pfd.nSize = size_of(PIXELFORMATDESCRIPTOR);
     pfd.nVersion = 1;
@@ -26,54 +22,42 @@ init_opengl :: (r: *Renderer) -> bool {
     pfd.cColorBits = 32;
     pfd.cDepthBits = 24;
     pfd.cStencilBits = 8;
-    pfd.iLayerType = PFD_MAIN_PLANE;
 
-    pixel_format := ChoosePixelFormat(r.window.hdc, *pfd);
-    if pixel_format == 0 {
-        log_error("ChoosePixelFormat failed! Error: %", GetLastError());
-        return false;
-    }
+    pf := ChoosePixelFormat(r.window.hdc, *pfd);
+    SetPixelFormat(r.window.hdc, pf, *pfd);
 
-    if !SetPixelFormat(r.window.hdc, pixel_format, *pfd) {
-        log_error("SetPixelFormat failed! Error: %", GetLastError());
-        return false;
-    }
-    temp_hglrc := wglCreateContext(r.window.hdc);
-    wglMakeCurrent(r.window.hdc, temp_hglrc);
-    if !temp_hglrc {
-        log_error("wglCreateContext failed! Error: %", GetLastError());
-        return false;
-    }
+    // Create dummy context
+    temp_rc := wglCreateContext(r.window.hdc);
+    wglMakeCurrent(r.window.hdc, temp_rc);
 
-    wglCreateContextAttribsARB := cast(PFNWGLCREATECONTEXTATTRIBSARBPROC) wglGetProcAddress("wglCreateContextAttribsARB");
+    wglCreateContextAttribsARB := cast(PFNWGLCREATECONTEXTATTRIBSARBPROC) wglGetProcAddress("wglCreateContextAttribsARB\0".data);
+    
     if wglCreateContextAttribsARB {
-    	attribs := s32.[
-    	    WGL_CONTEXT_MINOR_VERSION_ARB, 3,
+        attribs := s32.[
+            WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
+            WGL_CONTEXT_MINOR_VERSION_ARB, 3,
             WGL_CONTEXT_PROFILE_MASK_ARB,  WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
-            WGL_CONTEXT_FLAGS_ARB,         WGL_CONTEXT_DEBUG_BIT_ARB,
-            0 // Terminator
-    	];
-
-    	modern_context := wglCreateContextAttribsARB(r.window.hdc, null, attribs.data);
+            0, 0 
+        ];
+        modern_context := wglCreateContextAttribsARB(r.window.hdc, null, attribs.data);
         if modern_context {
             wglMakeCurrent(null, null);
-            wglDeleteContext(r.window.hglrc);
+            wglDeleteContext(temp_rc);
             r.window.hglrc = modern_context;
-        } else {
-            r.window.hglrc = temp_hglrc; // Fallback
         }
     } else {
-    	r.window.hglrc = temp_hglrc; // Old GPU fallback
+        r.window.hglrc = temp_rc;
     }
 
-    if !wglMakeCurrent(r.window.hdc, r.window.hglrc) {
-        log_error("wglMakeCurrent failed!");
-        return false;
-    }
+    wglMakeCurrent(r.window.hdc, r.window.hglrc);
 
-    gl_load(*r.gl, null);
+    gl_load(*r.gl, (name: *u8) -> *void #c_call {
+        p := wglGetProcAddress(name);
+        if p return p;
+        lib := GetModuleHandleW(null);
+        return GetProcAddress(GetModuleHandleA("opengl32.dll\0".data), name);
+    });
 
-    print("OpenGL Initialized Successfully!\n");
     return true;
 }
 
@@ -106,6 +90,7 @@ create_window :: (r: *Renderer, name: string, width: s32, height: s32) -> bool
     	rc.right - rc.left, rc.bottom - rc.top,
     	null, null, null, null
     );
+    SetWindowLongPtrW(hwnd, GWL_USERDATA, xx r);
 
     if !hwnd {
     	log_error("CreateWindowExW failed");
@@ -159,7 +144,7 @@ init_render_batch :: (r: *Renderer, batch: *Render_Batch) {
 	gl.glBufferData(GL_ARRAY_BUFFER, batch.max_vertices *size_of(Vertex), null, GL_DYNAMIC_DRAW);
 
 	gl.glEnableVertexAttribArray(0);
-	gl.glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, size_of(Vertex), xx 0);
+	gl.glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, size_of(Vertex), null);
 
 	gl.glEnableVertexAttribArray(1);
 	gl.glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, size_of(Vertex), cast(*void) size_of(Vector2));
@@ -237,6 +222,14 @@ create_shader_program :: (r: *Renderer, vertex_src: string, fragment_src: string
 	glAttachShader(program, fs);
 	glLinkProgram(program);
 
+	success: s32;
+    gl.glGetProgramiv(program, GL_LINK_STATUS, *success);
+    if !success {
+        info: [512]u8;
+        gl.glGetProgramInfoLog(program, 512, null, info.data);
+        print("Linker Error: %\n", to_string(info.data));
+    }
+
 	glDeleteShader(vs);
 	glDeleteShader(fs);
 
@@ -248,6 +241,8 @@ create_shader_program :: (r: *Renderer, vertex_src: string, fragment_src: string
 PFNWGLCREATECONTEXTATTRIBSARBPROC :: #type (hdc: HDC, hShareContext: HGLRC, attribList: *s32) -> HGLRC #c_call;
 
 wnd_proc :: (hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT #c_call {
+	r := cast(*Renderer) GetWindowLongPtrW(hwnd, GWL_USERDATA);
+
 	if msg == WM_DESTROY {
 		PostQuitMessage(0);
 		return 0;
@@ -256,7 +251,16 @@ wnd_proc :: (hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT #c_call {
 	if msg == WM_SIZE {
 		width := cast(s32) (lp & 0xFFFF);
 		height := cast(s32) (lp >> 16);
-		gl.glViewport(0, 0, xx width, xx height);
+		
+		if r != null {
+			r.window.height = xx height;
+			r.window.width = xx width;
+
+			if r.gl.glViewport {
+				r.gl.glViewport(0, 0, xx width, xx height);
+			}
+		}
+
 		return 0;
 	}
 
