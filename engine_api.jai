@@ -5,6 +5,7 @@
 #import "Windows";
 #import "Math";
 #import "GL";
+#import "SDL";
 
 Engine :: #library,no_static_library "engine";
 
@@ -16,10 +17,10 @@ Renderer :: struct {
 }
 
 W32Handle :: struct {
-	hdc: HDC;
-	width: s32;
-	hwnd: HWND;
-	height: s32; 
+ 	sdl_window: *SDL_Window;
+    gl_context: SDL_GLContext;
+    width:  s32;
+    height: s32;;
 }
 
 Render_Batch :: struct {
@@ -30,8 +31,10 @@ Render_Batch :: struct {
 }
 
 
-pump_messages :: () -> bool #elsewhere Engine;
-
+pump_messages :: (r: *Renderer) -> bool #elsewhere Engine;
+swap_buffers :: (r: *Renderer) {
+    SDL_GL_SwapWindow(r.window.sdl_window);
+}
 create_window :: (r: *Renderer, name: string, width: s32, height: s32) -> bool #elsewhere Engine;
 destroy_window :: (r: *Renderer) #elsewhere Engine;
 init_opengl :: (r: *Renderer) -> bool #elsewhere Engine;
